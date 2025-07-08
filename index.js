@@ -29,9 +29,9 @@
 
     .filter-bar {
       display: flex;
-      flex-wrap: wrap;
       gap: 10px;
       margin-bottom: 20px;
+      flex-wrap: wrap;
     }
 
     input[type="text"], select {
@@ -71,6 +71,40 @@
       background-color: #2563eb;
     }
 
+    .full-btn {
+      background-color: #d1d5db;
+      color: #9ca3af;
+      cursor: not-allowed;
+    }
+
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #1e40af;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: inline-block;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .loading-message {
+      text-align: center;
+      color: #6b7280;
+      font-size: 16px;
+      padding: 20px;
+    }
+
+    .error-message {
+      color: red;
+      text-align: center;
+      padding: 20px;
+    }
+
     footer {
       text-align: center;
       font-size: 14px;
@@ -98,7 +132,10 @@
     </div>
 
     <!-- Mentor Table -->
-    <table id="mentorsTable">
+    <div id="loading" class="loading-message">
+      <span class="loader"></span> Loading mentors...
+    </div>
+    <table id="mentorsTable" style="display: none;">
       <thead>
         <tr>
           <th>Name</th>
@@ -109,66 +146,94 @@
           <th>Action</th>
         </tr>
       </thead>
-      <tbody></tbody>
+      <tbody id="mentorsTableBody"></tbody>
     </table>
   </main>
 
   <footer>
-    &copy; 2025 VCU College of Engineering | Powered by Google Apps Script
+    &copy; 2025 VCU College of Engineering 
   </footer>
 
   <script>
     let allMentors = [];
 
-    // Load mentors and populate filters
     function refreshMentors() {
-      google.script.run.withSuccessHandler(function(data) {
-        allMentors = data;
-        populateFilters();
-        displayMentors(allMentors);
-      }).getMentors();
+      document.getElementById("loading").style.display = "block";
+      document.getElementById("mentorsTable").style.display = "none";
+      document.getElementById("mentorsTableBody").innerHTML = "";
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          allMentors = data;
+          populateFilters();
+          displayMentors(allMentors);
+          document.getElementById("loading").style.display = "none";
+          document.getElementById("mentorsTable").style.display = "table";
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById("loading").style.display = "none";
+          document.getElementById("mentorsTable").style.display = "none";
+          document.getElementById("mentorsTableBody").innerHTML = "<tr><td colspan='6' class='error-message'>⚠️ Error loading mentors: " + error + "</td></tr>";
+        })
+        .getMentors();
     }
 
-    // Display filtered mentors
     function displayMentors(mentors) {
-      var tbody = document.querySelector("#mentorsTable tbody");
+      var tbody = document.getElementById("mentorsTableBody");
       tbody.innerHTML = "";
 
       if (mentors.length === 0) {
-        tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;'>No available mentors match your search.</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='6' style='text-align:center;'>No mentors found.</td></tr>";
         return;
       }
 
       mentors.forEach(function(mentor) {
         var row = document.createElement("tr");
+
+        // Action cell
+        var actionCell = document.createElement("td");
+        if (mentor.availableSlots <= 0) {
+          var fullButton = document.createElement("button");
+          fullButton.textContent = "Full";
+          fullButton.disabled = true;
+          fullButton.classList.add("book-btn", "full-btn");
+          actionCell.appendChild(fullButton);
+        } else {
+          var bookButton = document.createElement("button");
+          bookButton.textContent = "Book";
+          bookButton.classList.add("book-btn");
+          bookButton.onclick = function() {
+            book(mentor.name);
+          };
+          actionCell.appendChild(bookButton);
+        }
+
+        // Populate other columns
         row.innerHTML = `
           <td>${mentor.name}</td>
           <td>${mentor.areaOfFocus}</td>
           <td>${mentor.industry}</td>
           <td>${mentor.company}</td>
           <td>${mentor.availableSlots}</td>
-          <td>
-            <button class="book-btn" onclick="bookSlot('${mentor.name}')">Book</button>
-          </td>
         `;
+        row.appendChild(actionCell);
         tbody.appendChild(row);
       });
     }
 
-    // Populate unique industries for filter dropdown
     function populateFilters() {
       const industries = [...new Set(allMentors.map(m => m.industry))];
-      const industrySelect = document.getElementById("filterIndustry");
+      const filterIndustry = document.getElementById("filterIndustry");
+      filterIndustry.innerHTML = "<option value=''>All Industries</option>";
 
       industries.forEach(ind => {
         const option = document.createElement("option");
         option.value = ind;
         option.textContent = ind;
-        industrySelect.appendChild(option);
+        filterIndustry.appendChild(option);
       });
     }
 
-    // Apply all filters
     function filterMentors() {
       let queryName = document.getElementById("searchName").value.toLowerCase();
       let queryCompany = document.getElementById("searchCompany").value.toLowerCase();
@@ -184,12 +249,23 @@
       displayMentors(filtered);
     }
 
-    // Book a slot
-    function bookSlot(mentorName) {
+    function book(mentorName) {
       var studentEmail = prompt("Enter your email address:");
-      if (studentEmail) {
-        google.script.run.withSuccessHandler(refreshMentors).bookSlot(mentorName, studentEmail);
-      }
+      if (!studentEmail) return;
+
+      studentEmail = studentEmail.trim().toLowerCase();
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result.success) {
+            alert(result.message);
+            return;
+          }
+
+          alert("Successfully booked with " + mentorName + "!");
+          refreshMentors();
+        })
+        .bookSlot(mentorName, studentEmail);
     }
 
     window.onload = refreshMentors;
