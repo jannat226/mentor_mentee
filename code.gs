@@ -5,32 +5,43 @@ function doGet() {
     .setTitle("VCU Engineering - Mentor Career Chat");
 }
 
-// Get all mentors with available slots
+// Get all mentors (including full ones) and signed-up students
 function getMentors() {
   var data = sheet.getDataRange().getValues();
   var headers = data[0];
 
-  // 🔁 Map header names to indexes
+  // Map header indexes
   var nameIdx = headers.indexOf("First & Last Name");
   var areaOfFocusIdx = headers.indexOf("Your area of focus (i.e. process engineering, full stack development, product R&D, etc.)");
   var industryIdx = headers.indexOf("Industry you can share about.");
-  var companyIdx = headers.indexOf("Company"); // ✅ Shorter Company column
-  var emailIdx = headers.indexOf("Email Address"); // ✅ Use Email Address instead
+  var companyIdx = headers.indexOf("Company");
+  var emailIdx = headers.indexOf("Email Address");
   var slotIdx = headers.indexOf("Available Slots");
+  var signupIdx = headers.indexOf("Signed-Up Students");
 
-  // Filter out full mentors
-  var mentors = data.slice(1).filter(function(row) {
-    return row[slotIdx] > 0;
-  });
+  // Collect all signed-up students
+  var allSignedUpStudents = [];
+  for (var i = 1; i < data.length; i++) {
+    var signedUp = data[i][signupIdx] || "";
+    if (signedUp) {
+      allSignedUpStudents.push(...signedUp.split(",").map(e => e.trim()));
+    }
+  }
 
-  return mentors.map(function(row) {
+  PropertiesService.getScriptProperties().setProperty("allSignedUpStudents", JSON.stringify(allSignedUpStudents));
+
+  // Return all mentors with their data
+  return data.slice(1).map(function(row) {
+    var signedUp = row[signupIdx] ? row[signupIdx].split(",").map(e => e.trim()) : [];
+
     return {
       name: row[nameIdx],
       areaOfFocus: row[areaOfFocusIdx],
       industry: row[industryIdx],
       company: row[companyIdx],
       email: row[emailIdx],
-      availableSlots: parseInt(row[slotIdx]) || 0
+      availableSlots: parseInt(row[slotIdx]) || 0,
+      signedUpStudents: signedUp
     };
   });
 }
@@ -48,12 +59,21 @@ function bookSlot(mentorName, studentEmail) {
   var industryIdx = headers.indexOf("Industry you can share about.");
   var companyIdx = headers.indexOf("Company");
 
+  // Check if student already signed up
+  var storedStudents = PropertiesService.getScriptProperties().getProperty("allSignedUpStudents");
+  var allSignedUpStudents = storedStudents ? JSON.parse(storedStudents) : [];
+
+  if (allSignedUpStudents.includes(studentEmail.trim())) {
+    return { success: false, message: "You've already booked a session." };
+  }
+
+  // Find the mentor and book
   for (var i = 1; i < data.length; i++) {
     if (data[i][nameIdx] === mentorName && data[i][slotIdx] > 0) {
-      // Decrease available slots
+      // Decrease slot
       sheet.getRange(i + 1, slotIdx + 1).setValue(data[i][slotIdx] - 1);
 
-      // Update signed-up students list
+      // Add student to list
       var currentStudents = data[i][signupIdx] || "";
       sheet.getRange(i + 1, signupIdx + 1).setValue(currentStudents + (currentStudents ? ", " : "") + studentEmail);
 
@@ -63,7 +83,7 @@ function bookSlot(mentorName, studentEmail) {
       var industry = data[i][industryIdx];
       var company = data[i][companyIdx];
 
-      // Send confirmation email to student
+      // Send confirmation
       MailApp.sendEmail({
         to: studentEmail,
         subject: "Career Chat Confirmation with " + mentorName,
@@ -77,8 +97,10 @@ function bookSlot(mentorName, studentEmail) {
       });
 
       break;
+    } else if (data[i][nameIdx] === mentorName && data[i][slotIdx] <= 0) {
+      return { success: false, message: "This mentor has no available slots." };
     }
   }
 
-  return true;
+  return { success: true };
 }
